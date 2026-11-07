@@ -1,4 +1,4 @@
-﻿# POOLS Co-op installer / uninstaller.
+# POOLS Co-op installer / uninstaller.
 #   install.bat                       -> install into every POOLS build found in your Steam library (flat and VR)
 #   install.bat -Build flat|vr        -> only one build
 #   install.bat -GameDir "D:\Games\Pools"

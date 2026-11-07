@@ -1,4 +1,4 @@
-﻿# POOLS Co-op (РјРѕРґ РґР»СЏ РєРѕРѕРїРµСЂР°С‚РёРІР° РІ POOLS)
+# POOLS Co-op (РјРѕРґ РґР»СЏ РєРѕРѕРїРµСЂР°С‚РёРІР° РІ POOLS)
 
 РќРµРѕС„РёС†РёР°Р»СЊРЅС‹Р№ РјРѕРґ, РєРѕС‚РѕСЂС‹Р№ РґРѕР±Р°РІР»СЏРµС‚ РІ РёРіСЂСѓ **POOLS** (Steam, app 2663530) СЃРѕРІРјРµСЃС‚РЅСѓСЋ РёРіСЂСѓ СЃ РґСЂСѓР·СЊСЏРјРё РїРѕ Steam: РІС‹ РІРёРґРёС‚Рµ РґСЂСѓРі РґСЂСѓРіР°,
 РґРІРµСЂРё Рё РїСЂРµРґРјРµС‚С‹ РґРІРёРіР°СЋС‚СЃСЏ Сѓ РѕР±РѕРёС…, СЃРєСЂРёРїС‚РѕРІС‹Рµ В«СЃС‚СЂР°С€РЅС‹Рµ РјРѕРјРµРЅС‚С‹В» СЃСЂР°Р±Р°С‚С‹РІР°СЋС‚ Сѓ РІСЃРµС…. Р Р°Р±РѕС‚Р°РµС‚ С‡РµСЂРµР· BepInEx 6 (IL2CPP).
@@ -21,7 +21,7 @@
 РћРґРЅРѕР№ РєРѕРјР°РЅРґРѕР№ PowerShell (РїРѕСЃР»Рµ РїСѓР±Р»РёРєР°С†РёРё СЂРµРїРѕР·РёС‚РѕСЂРёСЏ, РІРјРµСЃС‚Рѕ `duqisukixd/pools-coop` РїРѕРґСЃС‚Р°РІСЊС‚Рµ Р°РґСЂРµСЃ):
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/duqisuki/pools-coop/main/install.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm https://raw.githubusercontent.com/duqisuki/pools-coop/main/install.ps1)))"
 ```
 
 РЈРґР°Р»РµРЅРёРµ: **`uninstall.bat`**. РћРЅ СѓР±РёСЂР°РµС‚ СЂРѕРІРЅРѕ С‚Рѕ, С‡С‚Рѕ РїРѕСЃС‚Р°РІРёР» (РїРѕ СЃРїРёСЃРєСѓ `BepInEx\poolscoop-manifest.txt`); СЃРѕС…СЂР°РЅРµРЅРёСЏ РЅРµ С‚СЂРѕРіР°РµС‚.
