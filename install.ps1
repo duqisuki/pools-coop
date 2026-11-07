@@ -125,7 +125,7 @@ try {
   if (-not $PluginDll) {
     $local = if ($here) { Join-Path $here 'dist\PoolsCoop.dll' } else { '' }
     if ($local -and (Test-Path $local)) { $PluginDll = $local }
-    elseif ($RawBase -and $RawBase -ne 'https://raw.githubusercontent.com/duqisuki/pools-coop/main') {
+    elseif ($RawBase -like 'http*') {
       Say 'Downloading PoolsCoop.dll ...'
       $PluginDll = Join-Path $tmp 'PoolsCoop.dll'
       Invoke-WebRequest -Uri "$RawBase/dist/PoolsCoop.dll" -OutFile $PluginDll -UseBasicParsing
