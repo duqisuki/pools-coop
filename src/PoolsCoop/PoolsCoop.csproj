@@ -1,0 +1,55 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Offline build: no NuGet downloads. The BepInEx IL2CPP loader runs plugins on the .NET 6 runtime
+    that ships inside the game folder (<GameDir>\dotnet), so we compile against exactly those assemblies
+    instead of a targeting pack. GameDir is the TEST COPY, never the real install.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>PoolsCoop</AssemblyName>
+    <RootNamespace>PoolsCoop</RootNamespace>
+    <LangVersion>11.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences>
+    <NoStdLib>true</NoStdLib>
+    <UseAppHost>false</UseAppHost>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <GameDir Condition="'$(GameDir)' == ''">$(MSBuildThisFileDirectory)..\..\game</GameDir>
+    <!-- CA1416: the runtime assemblies in the game folder are the Windows implementation and carry platform attributes; the game is Windows-only anyway. -->
+    <NoWarn>$(NoWarn);CS1701;CS1702;CS0436;CS8981;CA1416</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- .NET 6 runtime used by BepInEx IL2CPP -->
+    <Reference Include="$(GameDir)\dotnet\System.Private.CoreLib.dll" Private="false" />
+    <Reference Include="$(GameDir)\dotnet\System.Runtime.dll" Private="false" />
+    <Reference Include="$(GameDir)\dotnet\netstandard.dll" Private="false" />
+    <Reference Include="$(GameDir)\dotnet\mscorlib.dll" Private="false" />
+    <Reference Include="$(GameDir)\dotnet\System.Collections.dll" Private="false" />
+    <Reference Include="$(GameDir)\dotnet\System.Linq.dll" Private="false" />
+    <Reference Include="$(GameDir)\dotnet\System.Console.dll" Private="false" />
+    <Reference Include="$(GameDir)\dotnet\System.Runtime.InteropServices.dll" Private="false" />
+    <Reference Include="$(GameDir)\dotnet\System.Threading.dll" Private="false" />
+    <Reference Include="$(GameDir)\dotnet\System.Net.Sockets.dll" Private="false" />
+    <Reference Include="$(GameDir)\dotnet\System.Net.Primitives.dll" Private="false" />
+    <Reference Include="$(GameDir)\dotnet\Microsoft.Win32.Primitives.dll" Private="false" />
+
+    <!-- BepInEx + Harmony + Il2CppInterop -->
+    <Reference Include="$(GameDir)\BepInEx\core\BepInEx.Core.dll" Private="false" />
+    <Reference Include="$(GameDir)\BepInEx\core\BepInEx.Unity.IL2CPP.dll" Private="false" />
+    <Reference Include="$(GameDir)\BepInEx\core\BepInEx.Unity.Common.dll" Private="false" />
+    <Reference Include="$(GameDir)\BepInEx\core\BepInEx.Preloader.Core.dll" Private="false" />
+    <Reference Include="$(GameDir)\BepInEx\core\0Harmony.dll" Private="false" />
+    <Reference Include="$(GameDir)\BepInEx\core\Il2CppInterop.Runtime.dll" Private="false" />
+    <Reference Include="$(GameDir)\BepInEx\core\Il2CppInterop.Common.dll" Private="false" />
+
+    <!-- Generated interop assemblies of the game -->
+    <Reference Include="$(GameDir)\BepInEx\interop\*.dll" Exclude="$(GameDir)\BepInEx\interop\__Generated.dll" Private="false" />
+  </ItemGroup>
+
+</Project>
+

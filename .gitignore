@@ -1,0 +1,8 @@
+bin/
+obj/
+out/
+game/
+*.user
+.vs/
+local/
+*.log
