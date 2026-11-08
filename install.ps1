@@ -128,9 +128,10 @@ try {
     elseif ($RawBase -like 'http*') {
       Say 'Downloading PoolsCoop.dll ...'
       $PluginDll = Join-Path $tmp 'PoolsCoop.dll'
-      Invoke-WebRequest -Uri "$RawBase/dist/PoolsCoop.dll" -OutFile $PluginDll -UseBasicParsing
-      $expected = (Invoke-WebRequest -Uri "$RawBase/dist/PoolsCoop.dll.sha256" -UseBasicParsing).Content.Trim().ToLowerInvariant()
-      if ((Get-Sha256 $PluginDll) -ne $expected) { Fail 'PoolsCoop.dll does not match its published SHA-256.' }
+      $bust = [Guid]::NewGuid().ToString('N')   # a fresh copy, not one the GitHub cache kept from before an update
+      Invoke-WebRequest -Uri "$RawBase/dist/PoolsCoop.dll?nocache=$bust" -OutFile $PluginDll -UseBasicParsing -Headers @{ 'Cache-Control' = 'no-cache' }
+      $expected = (Invoke-WebRequest -Uri "$RawBase/dist/PoolsCoop.dll.sha256?nocache=$bust" -UseBasicParsing -Headers @{ 'Cache-Control' = 'no-cache' }).Content.Trim().ToLowerInvariant()
+      if ((Get-Sha256 $PluginDll) -ne $expected) { Fail 'PoolsCoop.dll does not match its published SHA-256 (GitHub may still be updating its copy: wait 5 minutes and run the command again).' }
     } else { Fail 'PoolsCoop.dll not found. Download the whole repository (Code > Download ZIP) and run install.bat from it.' }
   }
   if (-not (Test-Path $PluginDll)) { Fail "Plugin file not found: $PluginDll" }
@@ -192,7 +193,13 @@ try {
     $plugDir = Join-Path $t 'BepInEx\plugins\PoolsCoop'
     New-Item -ItemType Directory -Force $plugDir | Out-Null
     $dest = Join-Path $plugDir 'PoolsCoop.dll'
+    $oldVer = if (Test-Path $dest) { (Get-Item $dest).VersionInfo.FileVersion } else { '' }
+    $oldHash = if (Test-Path $dest) { Get-Sha256 $dest } else { '' }
     Copy-Item $PluginDll $dest -Force
+    $newVer = (Get-Item $dest).VersionInfo.FileVersion
+    if (-not $oldHash) { Say "  PoolsCoop $newVer installed." DarkGray }
+    elseif ($oldHash -eq $pluginHash) { Say "  PoolsCoop $newVer was already the latest version." DarkGray }
+    else { Say "  PoolsCoop updated: $oldVer -> $newVer (your settings and saves are kept)." Green }
     if ((Get-Sha256 $dest) -ne $pluginHash) { Fail "Copy of PoolsCoop.dll into '$plugDir' is damaged." }
     $added.Add('BepInEx\plugins\PoolsCoop\PoolsCoop.dll')
 
