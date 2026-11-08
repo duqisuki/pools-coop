@@ -213,6 +213,47 @@ namespace PoolsCoop.Net
             GameEventReceived?.Invoke(id, kind, from);
         }
 
+        // ---- one-shot effects (footsteps, splashes) ------------------------------------------------
+        //
+        // Cosmetic and frequent, so they are sent once with no repeats: a lost footstep is better than a late one.
+
+        private const int MaxFxPerSecond = 40;
+        private long _fxWindowStart;
+        private int _fxWindowCount;
+        public int FxSent { get; private set; }
+        public int FxReceived { get; private set; }
+
+        /// <summary>Fires for every effect from another player.</summary>
+        public event Action<FxEvent> FxReceivedEvent;
+
+        public void SendFx(FxEvent e)
+        {
+            if (!Connected || !e.IsSane) return;
+            long now = _clock.NowMs;
+            if (now - _fxWindowStart > 1000) { _fxWindowStart = now; _fxWindowCount = 0; }
+            if (++_fxWindowCount > MaxFxPerSecond) return;
+            e.From = LocalId;
+            byte[] pkt = Wire.EncodeFx(e);
+            FxSent++;
+            if (Role == SessionRole.Host) foreach (var p in _peers.Values) Send(p.Conn, pkt);
+            else Send(0, pkt);
+        }
+
+        private void HandleFx(byte senderId, PacketReader r)
+        {
+            FxEvent e = Wire.ReadFx(r);
+            if (!e.IsSane) { BadPackets++; return; }
+            if (Role == SessionRole.Host)
+            {
+                e.From = senderId; // the connection says who really sent it
+                byte[] pkt = Wire.EncodeFx(e);
+                foreach (var p in _peers.Values) if (p.Id != senderId) Send(p.Conn, pkt);
+            }
+            else if (e.From == LocalId || e.From >= Wire.MaxPlayers) return;
+            FxReceived++;
+            FxReceivedEvent?.Invoke(e);
+        }
+
         private readonly List<KeyValuePair<long, KeyValuePair<int, byte[]>>> _relayRepeats = new List<KeyValuePair<long, KeyValuePair<int, byte[]>>>();
 
         private void QueueEventTo(int conn, byte[] pkt, long now)
@@ -676,6 +717,9 @@ namespace PoolsCoop.Net
                 case MsgType.GameEvent:
                     HandleGameEvent(peer.Id, r);
                     break;
+                case MsgType.Fx:
+                    HandleFx(peer.Id, r);
+                    break;
                 default:
                     break; // Welcome/State/Pong/BodyGrant are not meant for the host; ignore
             }
@@ -783,6 +827,9 @@ namespace PoolsCoop.Net
                     break;
                 case MsgType.GameEvent:
                     if (Connected) HandleGameEvent(0, r);
+                    break;
+                case MsgType.Fx:
+                    if (Connected) HandleFx(0, r);
                     break;
                 default:
                     break;

@@ -108,3 +108,48 @@ The two builds have different `GameAssembly.dll` hashes, so a mod built against 
 2. A person pushes and grabs doors in the flat build (touch detection), and walks into water with a friend watching.
 3. Host-driven chapter start through `SceneLoader.Load`, with save isolation.
 4. VR: a panel cloned from the `Side Buttons Panel` buttons, and a real-pose check with a headset.
+
+## 0.3.0 (2026-11-08): real hands, footsteps and splashes, VR menu
+
+Measured in headless runs on the test copies (`-batchmode -nographics`, SaveGuard on, saves unchanged after every run):
+
+- **Hands.** Both builds carry the full VR player rig in every chapter (inactive in the flat build): four Autohand hands
+  (`VR-AutoHand-Male-Left`, `-Male-Right Variant`, `-Female-Left`, `-Female-Right Variant`; the right ones are the left mesh mirrored by a
+  root scale of (-1,1,1)), each a `SkinnedMeshRenderer` `pools-vr-hands` / `pools-vr-hands-female` (3130 / 3481 vertices, 20 bones,
+  root bone `hand.L`, shader `Shader Graphs/VRHand`, skin tone property `_SkinToneContrast` from `VRHandsMaterialManager`). There is
+  **no body mesh** in VR; the game shows only hands. `HandTemplate` copies bone names, rest pose, mesh and materials once; the open and
+  closed rotation of every finger joint are read from the game's own `Autohand.Finger.SetFingerBend(0/1, Open, Closed)` and the joints
+  are put back in the same frame (`fingerPosesFromGame=True` for all four hands in both builds). Puppets get a plain copy (no physics,
+  colliders or scripts) with fingers driven by 5 bend bytes per hand. The hand frame (finger direction, palm direction) is computed from
+  the bones, not guessed: fingers along -X/+X of the root (left/right), palm along -Y.
+- **Pose packet extension** (protocol unchanged, 12 trailing bytes after the three poses; older readers ignore them, a packet without them
+  still reads): flags (VR, female hands, moving, swimming, hands-are-roots), skin tone, 5+5 finger bends. VR senders send the root pose of
+  the game's physics hand (where it really is, stopped by walls), not the controller. Flat senders send hands hanging at the sides that
+  swing while walking and reach forward while a mouse button is held.
+- **Effects** (new message `Fx` = 13, unreliable, once, relayed by the host with the sender id enforced, 40/s limit). Harmony prefixes on
+  `PlayerFootstepsAudioManager.PlayFootstepSound` (ground point, volume, direction, surface material, water depth),
+  `RigidbodyRippleSpawner.Splash(enter)` (local body and hands only; the VR `XR Player Body` spawner has `isPlayer = false`, so the body is
+  recognised by its `PlayerBody` component) and `SplashSpawner.PlaySplashDelayed`. The receiver calls `PlayFootstepSound` at the friend's
+  ground point (the local wetness fields are saved and restored around the call), a ripple and spray in water, and for splashes the game's
+  hand splash sounds (`enterWaterAudio`/`exitWaterAudio`, the body spawners have none) through `FMODUnity.RuntimeManager.PlayOneShot`.
+  Pair run, flat build, chapter 0: each side sent 32 steps and 8 splashes through the game's own methods, the other side replayed 32/32 and
+  8/8, 20 ripples, 20 sprays, 4 splash sounds, 0 failures. Same in the VR build.
+- **Build difference found:** `RigidbodyRippleSpawner.vrHandWaterDetector` exists only in the VR build's game assembly. Using it threw
+  `MissingMethodException` every frame in the flat build (it broke the method that used it). `build.ps1` now compiles the plugin a second
+  time against the flat build's interop assemblies; it fails if anything used is missing there.
+- **Objects:** in VR the touch points are the physics hands, and a body held by an Autohand hand (`Hand.holdingObj.body`) is claimed and
+  never released while held.
+- **Menus.** Flat: a `CO-OP (F7)` button at the top right whenever the cursor is free (seen in `MainMenu`), keys F7 and F8, the old Input
+  Manager as a fallback, and a log line for every opening. VR: the panel and a `CO-OP` button are copies of the game's own world-space
+  canvases (`Side Buttons Panel/.../Settings Button/Canvas`, layer 13, `TrackedDeviceGraphicRaycaster`) with everything but the canvas
+  stripped. The button stands one step under `Quit Game` (measured y 1.22 -> 0.89). A test press of its `onClick` opened the panel 1.2 m in
+  front of the head. In chapters the panel opens beside the game's `PauseCanvasVR/PauseScreen` while it is active.
+- Offline tests: 231 checks, `ALL OK` (new: pose extension round trip, old packets, relay and buffer keep fingers; effects reach everyone
+  once, sender id enforced, rate limited).
+- Known test artefact: in the VR build the door bot's door index 4 is a door that does not move enough when spun, so neither side
+  auto-claims it and the final orientations differ by 4.4 degrees (same in two runs). Not related to these changes; doors 0-3 pass.
+
+Not verified: how the hands and the head/torso look (no rendering in the allowed test mode; `HDRP/Lit` is not reported in a
+`-nographics` run, so the head and torso fall back to `HDRP/Unlit` there), the name label, finger bends from a real headset, the VR
+button pressed by a real controller ray, footsteps and splashes heard by a person, the F7 problem on the owner's PC (needs its
+`BepInEx\LogOutput.log`).

@@ -85,10 +85,57 @@ namespace PoolsCoop.Net
         public bool IsSane => Pos.IsSane && Rot.IsSane && Vel.IsSane && AngVel.IsSane;
     }
 
+    /// <summary>How far each finger of one hand is bent, 0 = open, 255 = fist.</summary>
+    public struct FingerBends
+    {
+        public byte Thumb, Index, Middle, Ring, Pinky;
+
+        public FingerBends(byte thumb, byte index, byte middle, byte ring, byte pinky)
+        {
+            Thumb = thumb; Index = index; Middle = middle; Ring = ring; Pinky = pinky;
+        }
+
+        public static FingerBends All(byte v) => new FingerBends(v, v, v, v, v);
+
+        /// <summary>0 thumb, 1 index, 2 middle, 3 ring, 4 pinky.</summary>
+        public byte this[int i]
+        {
+            get
+            {
+                switch (i) { case 0: return Thumb; case 1: return Index; case 2: return Middle; case 3: return Ring; default: return Pinky; }
+            }
+            set
+            {
+                switch (i) { case 0: Thumb = value; break; case 1: Index = value; break; case 2: Middle = value; break; case 3: Ring = value; break; default: Pinky = value; break; }
+            }
+        }
+
+        public static FingerBends Lerp(FingerBends a, FingerBends b, double f)
+        {
+            var r = new FingerBends();
+            for (int i = 0; i < 5; i++) r[i] = (byte)Math.Round(a[i] + (b[i] - a[i]) * Math.Max(0, Math.Min(1, f)));
+            return r;
+        }
+    }
+
+    /// <summary>Bits of PlayerPose.Flags.</summary>
+    public static class PoseFlags
+    {
+        public const byte Vr = 1;            // the sender plays in a headset (hands are tracked)
+        public const byte FemaleHands = 2;   // the sender picked the female hand model in the game's settings
+        public const byte Extended = 4;      // the fields after the three poses were on the wire (newer sender)
+        public const byte Moving = 8;        // the sender's body is walking (flat-screen hands swing)
+        public const byte Swimming = 16;
+        public const byte HandsAreRoots = 32; // Left/Right are the hand model's root pose (not a controller pose)
+    }
+
     /// <summary>Head plus both hands, in world space.</summary>
     public struct PlayerPose
     {
         public NetPose Head, Left, Right;
+        public FingerBends LeftFingers, RightFingers;
+        public byte Flags;
+        public byte Skin; // skin tone 0..255 (the game's slider 0..1)
 
         public bool IsSane => Head.IsSane && Left.IsSane && Right.IsSane;
 

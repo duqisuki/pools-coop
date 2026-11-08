@@ -219,13 +219,17 @@ namespace PoolsCoop
             }
 
             var touch = CollectTouchPoints();
+            _held.Clear();
+            if (Plugin.IsVrActive) { try { LocalRig.HeldBodies(_held); } catch (Exception) { } }
             foreach (var b in _bodies.Values)
             {
                 if (b.Rb == null) continue;
                 bool mine = s.IsBodyOwner(b.Id);
                 bool pendingMine = s.Bodies.TryGetValue(b.Id, out BodyView view) && view.Owner == s.LocalId && !mine;
+                bool held = IsHeld(b);
+                if (held) b.RestSince = -1f; // a body in the hand is never released, even when held still
 
-                if (!mine && !pendingMine && now >= b.NextClaim && Touching(b, touch))
+                if (!mine && !pendingMine && now >= b.NextClaim && (held || Touching(b, touch)))
                 {
                     b.NextClaim = now + ClaimCooldownS;
                     Claims++;
@@ -299,6 +303,15 @@ namespace PoolsCoop
 
         // ---- touch ---------------------------------------------------------------------------------
 
+        private readonly List<Rigidbody> _held = new List<Rigidbody>(2);
+
+        private bool IsHeld(Synced b)
+        {
+            for (int i = 0; i < _held.Count; i++)
+                if (_held[i] != null && _held[i].Pointer == b.Rb.Pointer) return true;
+            return false;
+        }
+
         private static List<KeyValuePair<Vector3, float>> CollectTouchPoints()
         {
             var pts = new List<KeyValuePair<Vector3, float>>(4);
@@ -322,6 +335,12 @@ namespace PoolsCoop
                     var o = Backrooms.Features.VR.PoolsXROrigin.Instance;
                     var cam = o.xrOrigin != null ? o.xrOrigin.Camera : null;
                     if (cam != null) pts.Add(new KeyValuePair<Vector3, float>(cam.transform.position, 0.18f));
+                    // the game's physics hands, where they really are (they stop at surfaces instead of passing through)
+                    if (LocalRig.TryHandPositions(out Vector3 lh, out Vector3 rh))
+                    {
+                        pts.Add(new KeyValuePair<Vector3, float>(lh, 0.11f));
+                        pts.Add(new KeyValuePair<Vector3, float>(rh, 0.11f));
+                    }
                     if (o.leftMotionControllerTracking != null) pts.Add(new KeyValuePair<Vector3, float>(o.leftMotionControllerTracking.transform.position, 0.12f));
                     if (o.rightMotionControllerTracking != null) pts.Add(new KeyValuePair<Vector3, float>(o.rightMotionControllerTracking.transform.position, 0.12f));
                 }

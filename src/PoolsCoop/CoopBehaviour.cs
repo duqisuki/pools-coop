@@ -77,7 +77,7 @@ namespace PoolsCoop
 
                 if (Plugin.Events != null)
                 {
-                    try { Plugin.Events.Update(s, now); UpdateEventBot(s, now); }
+                    try { Plugin.Events.Update(s, now); UpdateEventBot(s, now); FxSync.RunBot(s, now); }
                     catch (Exception e) { Plugin.Logger.LogWarning($"event sync failed: {e}"); }
                 }
 
@@ -106,6 +106,7 @@ namespace PoolsCoop
                         Plugin.Logger.LogInfo($"EVENT-STATS hooked={ev.Hooked} localFired={ev.LocalFired} replayed={ev.Replayed} skippedEcho={ev.SkippedEcho} unknownId={ev.UnknownId} sent={s.GameEventsSent} received={s.GameEventsReceived}");
                 }
                 catch (Exception e) { Plugin.Logger.LogWarning($"event final log failed: {e.Message}"); }
+                Plugin.Logger.LogInfo($"FX-STATS botCalls={FxSync.BotCalls} botErrors={FxSync.BotErrors} sentSteps={FxSync.SentSteps} sentSplashes={FxSync.SentSplashes} replayedSteps={FxSync.ReplayedSteps} replayedSplashes={FxSync.ReplayedSplashes} failures={FxSync.Failures} ripples={PuppetWater.RipplesRequested} particles={PuppetWater.ParticlesSpawned} sounds={PuppetWater.SoundsPlayed} wakes={PuppetWater.Wakes} waterErrors={PuppetWater.Errors}");
                 LogTestResult(s);
                 Application.Quit();
             }
@@ -121,13 +122,14 @@ namespace PoolsCoop
             if (!_panelInit)
             {
                 _panelInit = true;
-                if (Plugin.ShowPanelAtStart) CoopPanel.Toggle();
+                if (Plugin.ShowPanelAtStart) CoopPanel.SetVisible(true, "test switch");
+                Plugin.Logger.LogInfo("co-op: press F7 (or F8), or the CO-OP button in the menu, for the co-op panel");
             }
 
             if (Plugin.AutoHost) UpdateAutoHost(now);
 
-            var kb = UnityEngine.InputSystem.Keyboard.current;
-            if (kb != null && kb.f7Key.wasPressedThisFrame) CoopPanel.Toggle();
+
+            CoopPanel.HandleKeys();
 
             if (Plugin.ShotAtSeconds > 0 && !_shotTaken && now - _t0 >= Plugin.ShotAtSeconds)
             {
@@ -325,30 +327,10 @@ namespace PoolsCoop
                 return;
             }
 
-            if (Plugin.IsVrActive && Backrooms.Features.VR.PoolsXROrigin.IsInstanced)
-            {
-                var o = Backrooms.Features.VR.PoolsXROrigin.Instance;
-                var vrCam = o.xrOrigin != null ? o.xrOrigin.Camera : null;
-                if (vrCam == null || o.leftMotionControllerTracking == null || o.rightMotionControllerTracking == null) return;
-
-                var pose = new PlayerPose();
-                pose.Head = FromTransform(vrCam.transform);
-                pose.Left = FromTransform(o.leftMotionControllerTracking.transform);
-                pose.Right = FromTransform(o.rightMotionControllerTracking.transform);
-                s.SendLocalPose(pose, tms);
-                return;
-            }
-
-            // Flat screen: no tracked hands, so the head is the camera and the hands hang where a standing player's hands rest.
-            Camera cam = FlatCamera();
-            if (cam == null) return;
-            Transform c = cam.transform;
-            Quaternion r = c.rotation;
-            var flat = new PlayerPose();
-            flat.Head = FromTransform(c);
-            flat.Left = new NetPose(ToVec(c.position + r * new Vector3(-0.22f, -0.38f, 0.32f)), ToQuat(r));
-            flat.Right = new NetPose(ToVec(c.position + r * new Vector3(0.22f, -0.38f, 0.32f)), ToQuat(r));
-            s.SendLocalPose(flat, tms);
+            // VR: the head camera and the game's own physics hands with their finger bends; flat screen: the camera and natural hands.
+            PlayerPose pose;
+            bool ok = Plugin.IsVrActive ? LocalRig.TryVr(now, out pose) : LocalRig.TryFlat(now, out pose);
+            if (ok) s.SendLocalPose(pose, tms);
         }
 
         /// <summary>The camera the flat-screen player looks through.</summary>
@@ -367,6 +349,14 @@ namespace PoolsCoop
 
         private static Vec3 ToVec(Vector3 v) => new Vec3(v.x, v.y, v.z);
         private static Quat ToQuat(Quaternion q) => new Quat(q.x, q.y, q.z, q.w);
+
+        [HideFromIl2Cpp]
+        private int RealHandPuppets()
+        {
+            int n = 0;
+            foreach (var p in _puppets.Values) if (p.HasRealHands) n++;
+            return n;
+        }
 
         private static NetPose FromTransform(Transform t)
         {
@@ -468,7 +458,7 @@ namespace PoolsCoop
                         && _puppetErrs.Count >= 100
                         && p95 < 0.010f;
             Plugin.Logger.LogInfo(FormattableString.Invariant(
-                $"COOP-TEST-RESULT role={s.Role} id={s.LocalId} connected={s.Connected} remotesWithPose={remotesWithPose} posesAccepted={posesIn} poseOk={Plugin.PoseOk} poseBad={Plugin.PoseBad} puppets={_puppets.Count} puppetErrMm(p50/p95/max)={p50 * 1000f:F1}/{p95 * 1000f:F1}/{max * 1000f:F0} frames={_puppetErrs.Count} bufferDelayMs={_lastDelayMs:F0} visualLatencyMs~{s.RttMs / 2 + _lastDelayMs:F0} maxFrameMs={_maxFrame * 1000f:F0} badPackets={s.BadPackets} rejectedClaims={s.RejectedPoseClaims} strayPackets={s.StrayPackets} rttMs={s.RttMs:F1} hostScene='{s.HostScene}' verdict={(pass ? "PASS" : "FAIL")}"));
+                $"COOP-TEST-RESULT role={s.Role} id={s.LocalId} realHands={RealHandPuppets()} handTemplates={HandTemplate.Captured} fxSent={s.FxSent} fxReceived={s.FxReceived} stepsReplayed={FxSync.ReplayedSteps} splashesReplayed={FxSync.ReplayedSplashes} connected={s.Connected} remotesWithPose={remotesWithPose} posesAccepted={posesIn} poseOk={Plugin.PoseOk} poseBad={Plugin.PoseBad} puppets={_puppets.Count} puppetErrMm(p50/p95/max)={p50 * 1000f:F1}/{p95 * 1000f:F1}/{max * 1000f:F0} frames={_puppetErrs.Count} bufferDelayMs={_lastDelayMs:F0} visualLatencyMs~{s.RttMs / 2 + _lastDelayMs:F0} maxFrameMs={_maxFrame * 1000f:F0} badPackets={s.BadPackets} rejectedClaims={s.RejectedPoseClaims} strayPackets={s.StrayPackets} rttMs={s.RttMs:F1} hostScene='{s.HostScene}' verdict={(pass ? "PASS" : "FAIL")}"));
         }
     }
 }

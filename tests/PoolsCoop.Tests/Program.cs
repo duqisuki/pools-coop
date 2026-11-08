@@ -48,6 +48,8 @@ namespace PoolsCoop.Tests
             Test("bodies: claim, conflict, stale states and grants, release, owner leaves, late join", BodyOwnership);
             Test("bodies: 30% loss + duplicates + jitter, random claims and releases, every view converges", BodyChaos);
             Test("events: scripted events reach everyone exactly once through loss, duplicates and relay", GameEvents);
+            Test("pose extension: finger bends, skin, flags round trip, old packets still read, relay and buffer keep them", PoseExtension);
+            Test("effects: footsteps and splashes reach everyone once, sender id enforced, rate limited", Effects);
             Test("capacity: the fourth guest is turned away", Capacity);
             Test("fuzz: random and mutated packets never crash a session and never leak slots", Fuzz);
             Test("udp: real sockets on loopback, handshake and poses", RealUdp);
@@ -656,6 +658,101 @@ namespace PoolsCoop.Tests
             for (uint i = 0; i < 500; i++) cl.S.SendGameEvent(i, 0);
             h2.Run(3000, Pump(ho), Pump(cl));
             Check(received <= 70 && received >= 50, $"rate limit: 500 events in one instant -> {received} delivered");
+        }
+
+        private static void PoseExtension()
+        {
+            // round trip of the extension, and an old-format packet (no extension) still reads
+            var p = BotPose.At(1234, 1);
+            p.Flags = (byte)(PoseFlags.Vr | PoseFlags.FemaleHands | PoseFlags.HandsAreRoots);
+            p.Skin = 77;
+            p.LeftFingers = new FingerBends(1, 2, 3, 4, 5);
+            p.RightFingers = new FingerBends(250, 200, 150, 100, 50);
+            byte[] pkt = Wire.EncodePose(1, 9, 1234, p);
+            Check(Wire.TryOpen(pkt, pkt.Length, out MsgType t, out PacketReader r) && t == MsgType.Pose, "extended pose opens");
+            r.U8(); r.U16(); r.U32();
+            var q = r.Player();
+            Check(q.Flags == (p.Flags | PoseFlags.Extended) && q.Skin == 77, "flags and skin survive (Extended bit set by the writer)");
+            bool fingersOk = true;
+            for (int i = 0; i < 5; i++) fingersOk &= q.LeftFingers[i] == p.LeftFingers[i] && q.RightFingers[i] == p.RightFingers[i];
+            Check(fingersOk, "all ten finger bends survive");
+            Check(q.MaxPosDistance(p) == 0f, "positions unchanged by the extension");
+            byte[] old = new byte[pkt.Length - 12];
+            Buffer.BlockCopy(pkt, 0, old, 0, old.Length);
+            Check(Wire.TryOpen(old, old.Length, out _, out PacketReader r2), "old pose (no extension) opens");
+            r2.U8(); r2.U16(); r2.U32();
+            var o = r2.Player();
+            Check(o.Flags == 0 && o.MaxPosDistance(p) == 0f, "old pose reads with no flags");
+
+            // through the host relay to another client, interpolated by the buffer
+            var hub = new FakeHub(81);
+            var host = MakeNode(hub, SessionRole.Host, "H");
+            var a = MakeNode(hub, SessionRole.Client, "A");
+            var b = MakeNode(hub, SessionRole.Client, "B");
+            hub.Run(1500, Pump(host), Pump(a), Pump(b));
+            long next = 0;
+            Action send = () =>
+            {
+                if (hub.Clock.NowMs < next || !a.S.Connected) return;
+                next = hub.Clock.NowMs + 16;
+                uint tm = (uint)hub.Clock.NowMs;
+                var pose = BotPose.At(tm, a.S.LocalId);
+                pose.Flags = PoseFlags.Vr;
+                pose.Skin = 200;
+                pose.LeftFingers = FingerBends.All(180);
+                pose.RightFingers = FingerBends.All(20);
+                a.S.SendLocalPose(pose, tm);
+            };
+            hub.Run(2000, Pump(host), Pump(a), Pump(b), send);
+            RemotePlayer rp = null;
+            Check(b.S.Remotes.TryGetValue(a.S.LocalId, out rp) && rp.HasPose, "B has A's pose");
+            PlayerPose drawn = default(PlayerPose);
+            Check(rp != null && rp.Buffer.Sample(b.S.NowMs, out drawn) && drawn.LeftFingers.Index == 180 && drawn.RightFingers.Pinky == 20 && drawn.Skin == 200 && (drawn.Flags & PoseFlags.Vr) != 0,
+                "fingers, skin and flags arrive at B through the host and through the buffer");
+            var mid = FingerBends.Lerp(FingerBends.All(0), FingerBends.All(200), 0.5);
+            Check(mid.Middle == 100, "finger bends interpolate");
+        }
+
+        private static void Effects()
+        {
+            foreach (double loss in new[] { 0.0, 0.2 })
+            {
+                var hub = new FakeHub(90 + (int)(loss * 10)) { Loss = loss, Dup = 0, MinDelayMs = 5, MaxDelayMs = 40 };
+                var host = MakeNode(hub, SessionRole.Host, "H");
+                var a = MakeNode(hub, SessionRole.Client, "A");
+                var b = MakeNode(hub, SessionRole.Client, "B");
+                hub.Run(4000, Pump(host), Pump(a), Pump(b));
+                var onHost = new List<FxEvent>(); var onA = new List<FxEvent>(); var onB = new List<FxEvent>();
+                host.S.FxReceivedEvent += e => onHost.Add(e);
+                a.S.FxReceivedEvent += e => onA.Add(e);
+                b.S.FxReceivedEvent += e => onB.Add(e);
+                for (int i = 0; i < 30; i++)
+                {
+                    a.S.SendFx(new FxEvent { Kind = FxKind.Footstep, From = 3 /* forged, must be replaced */, Pos = new Vec3(i, 1, 2), A = 0.8f, B = 0.2f, C = 1, D = 255 });
+                    hub.Run(50, Pump(host), Pump(a), Pump(b));
+                }
+                host.S.SendFx(new FxEvent { Kind = FxKind.BodySplash, Pos = new Vec3(5, 0, 5), A = 3f, B = 1f });
+                hub.Run(500, Pump(host), Pump(a), Pump(b));
+                double need = loss > 0 ? 0.6 : 1.0;
+                Check(onHost.Count >= need * 30 && onHost.Count <= 30, $"[loss {loss}] host got A's steps once each ({onHost.Count}/30, A connected={a.S.Connected}, sent={a.S.FxSent})");
+                Check(onB.FindAll(e => e.Kind == FxKind.Footstep).Count >= need * need * 30, $"[loss {loss}] B got A's steps through the relay ({onB.Count})");
+                Check(onA.FindAll(e => e.Kind == FxKind.Footstep).Count == 0, $"[loss {loss}] A never gets its own steps back");
+                Check(onB.TrueForAll(e => e.Kind != FxKind.Footstep || e.From == a.S.LocalId), $"[loss {loss}] the sender id is A's real id, not the forged one");
+                var st = onB.Find(e => e.Kind == FxKind.Footstep);
+                Check(onB.Count == 0 || (st.A == 0.8f && st.B == 0.2f && st.C == 1 && st.D == 255), $"[loss {loss}] footstep fields survive");
+                if (loss == 0) Check(onA.Exists(e => e.Kind == FxKind.BodySplash && e.From == 0) && onB.Exists(e => e.Kind == FxKind.BodySplash), "the host's splash reaches both clients");
+            }
+
+            var h2 = new FakeHub(99);
+            var ho = MakeNode(h2, SessionRole.Host, "H");
+            var cl = MakeNode(h2, SessionRole.Client, "C");
+            h2.Run(1500, Pump(ho), Pump(cl));
+            int got = 0;
+            ho.S.FxReceivedEvent += e => got++;
+            for (int i = 0; i < 300; i++) cl.S.SendFx(new FxEvent { Kind = FxKind.Footstep, Pos = new Vec3(0, 0, 0) });
+            cl.S.SendFx(new FxEvent { Kind = FxKind.Footstep, Pos = new Vec3(float.NaN, 0, 0) });
+            h2.Run(1000, Pump(ho), Pump(cl));
+            Check(got <= 40 && got >= 30, $"fx rate limit: 300 in one instant -> {got}");
         }
 
         private static void Capacity()

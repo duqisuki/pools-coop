@@ -18,6 +18,28 @@ namespace PoolsCoop.Net
         BodyState = 10,   // owner -> host -> others: position, rotation, velocities of body X
         BodyRelease = 11, // owner -> host: body X came to rest, nobody needs to stream it
         GameEvent = 12,   // a scripted event fired for one player (scare, trigger); everyone else replays it
+        Fx = 13,          // a one-shot effect at a place (footstep, splash); unreliable, sent once, relayed by the host
+    }
+
+    /// <summary>Kinds of Fx messages.</summary>
+    public static class FxKind
+    {
+        public const byte Footstep = 1;   // A = volume, B = water depth, C = surface material, D = step direction
+        public const byte BodySplash = 2; // A = speed, B = 1 enter / 0 exit
+        public const byte BigSplash = 3;  // A = air time, C = splash type
+        public const byte HandSplash = 4; // A = speed, B = 1 enter / 0 exit
+    }
+
+    /// <summary>One effect: kind, the player it happened to, where, and a few numbers whose meaning depends on the kind.</summary>
+    public struct FxEvent
+    {
+        public byte Kind;
+        public byte From;
+        public Vec3 Pos;
+        public float A, B;
+        public byte C, D;
+
+        public bool IsSane => Pos.IsSane && Vec3.Ok(A) && Vec3.Ok(B);
     }
 
     public sealed class PlayerInfo
@@ -80,7 +102,15 @@ namespace PoolsCoop.Net
             return F32(p.Pos.X).F32(p.Pos.Y).F32(p.Pos.Z).F32(p.Rot.X).F32(p.Rot.Y).F32(p.Rot.Z).F32(p.Rot.W);
         }
 
-        public PacketWriter Player(PlayerPose p) => Pose(p.Head).Pose(p.Left).Pose(p.Right);
+        public PacketWriter Player(PlayerPose p)
+        {
+            Pose(p.Head).Pose(p.Left).Pose(p.Right);
+            // Extension (protocol 1, newer senders): flags, skin tone, five finger bends per hand. Older readers ignore trailing bytes.
+            U8((byte)(p.Flags | PoseFlags.Extended)).U8(p.Skin);
+            for (int i = 0; i < 5; i++) U8(p.LeftFingers[i]);
+            for (int i = 0; i < 5; i++) U8(p.RightFingers[i]);
+            return this;
+        }
 
         public PacketWriter Body(BodyState b)
         {
@@ -153,8 +183,17 @@ namespace PoolsCoop.Net
             p.Head = Pose();
             p.Left = Pose();
             p.Right = Pose();
+            if (_len - _pos >= 12)
+            {
+                p.Flags = U8();
+                p.Skin = U8();
+                for (int i = 0; i < 5; i++) p.LeftFingers[i] = U8();
+                for (int i = 0; i < 5; i++) p.RightFingers[i] = U8();
+            }
             return p;
         }
+
+        public int Remaining => _len - _pos;
 
         public BodyState Body()
         {
@@ -186,7 +225,7 @@ namespace PoolsCoop.Net
             if ((ushort)(data[0] | (data[1] << 8)) != Magic) return false;
             if (data[2] != Version) return false;
             byte t = data[3];
-            if (t < (byte)MsgType.Hello || t > (byte)MsgType.GameEvent) return false;
+            if (t < (byte)MsgType.Hello || t > (byte)MsgType.Fx) return false;
             type = (MsgType)t;
             reader = new PacketReader(data, len, 4);
             return true;
@@ -216,6 +255,22 @@ namespace PoolsCoop.Net
 
         public static byte[] EncodeGameEvent(uint eventId, byte kind, byte from, ushort seq) =>
             new PacketWriter(MsgType.GameEvent).U32(eventId).U8(kind).U8(from).U16(seq).ToArray();
+
+        public static byte[] EncodeFx(FxEvent e) =>
+            new PacketWriter(MsgType.Fx).U8(e.Kind).U8(e.From).F32(e.Pos.X).F32(e.Pos.Y).F32(e.Pos.Z).F32(e.A).F32(e.B).U8(e.C).U8(e.D).ToArray();
+
+        public static FxEvent ReadFx(PacketReader r)
+        {
+            var e = new FxEvent();
+            e.Kind = r.U8();
+            e.From = r.U8();
+            e.Pos = new Vec3(r.F32(), r.F32(), r.F32());
+            e.A = r.F32();
+            e.B = r.F32();
+            e.C = r.U8();
+            e.D = r.U8();
+            return e;
+        }
 
         public static byte[] EncodeBodyClaim(uint bodyId, ushort epochSeen) =>
             new PacketWriter(MsgType.BodyClaim).U32(bodyId).U16(epochSeen).ToArray();

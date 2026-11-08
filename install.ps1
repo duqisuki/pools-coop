@@ -207,7 +207,7 @@ try {
   Write-Host ''
   Say 'Done. Start POOLS from Steam as usual.' Green
   Say '  - The FIRST start takes about a minute longer: the mod prepares its files.' Gray
-  Say '  - In the main menu press F7 for the Co-op panel (Host a game / Join a friend).' Gray
+  Say '  - In the main menu click CO-OP (F7) at the top right (VR: the CO-OP button under the side buttons) for Host a game / Join a friend.' Gray
   Say '  - Both players need the mod, be Steam friends, and start the same chapter.' Gray
   Say '  - To remove everything: run uninstall.bat. Your saves are never touched.' Gray
 }

@@ -188,6 +188,10 @@ namespace PoolsCoop.Net
             p.Head = BlendOne(a.Head, b.Head, f);
             p.Left = BlendOne(a.Left, b.Left, f);
             p.Right = BlendOne(a.Right, b.Right, f);
+            p.LeftFingers = FingerBends.Lerp(a.LeftFingers, b.LeftFingers, f);
+            p.RightFingers = FingerBends.Lerp(a.RightFingers, b.RightFingers, f);
+            p.Flags = f < 0.5 ? a.Flags : b.Flags;
+            p.Skin = b.Skin;
             return p;
         }
     }

@@ -55,6 +55,67 @@ namespace PoolsCoop
             return string.Join(",", names);
         }
 
+        private static void DumpTree(StringBuilder sb, Transform t, int depth, int maxDepth)
+        {
+            string pad = new string(' ', depth * 2);
+            string extra = "";
+            try
+            {
+                var r = t.GetComponent<Renderer>();
+                if (r != null)
+                {
+                    var mats = new List<string>();
+                    foreach (var m in r.sharedMaterials) mats.Add(m == null ? "null" : $"{m.name}<{(m.shader != null ? m.shader.name : "?")}>");
+                    string mesh = "";
+                    var smr = r.TryCast<SkinnedMeshRenderer>();
+                    if (smr != null && smr.sharedMesh != null) mesh = $" skinned mesh='{smr.sharedMesh.name}' v={smr.sharedMesh.vertexCount} bones={smr.bones.Length} root='{(smr.rootBone != null ? smr.rootBone.name : "")}'";
+                    var mf = t.GetComponent<MeshFilter>();
+                    if (mf != null && mf.sharedMesh != null) mesh = $" mesh='{mf.sharedMesh.name}' v={mf.sharedMesh.vertexCount}";
+                    extra = $" R[{r.GetIl2CppType().Name} en={r.enabled}{mesh} mats={string.Join(";", mats)}]";
+                }
+            }
+            catch (Exception e) { extra = " R[err " + e.GetType().Name + "]"; }
+            Vector3 lp = t.localPosition, ls = t.localScale;
+            sb.AppendLine(FormattableString.Invariant($"{pad}{t.name} act={t.gameObject.activeSelf} lp=({lp.x:F3},{lp.y:F3},{lp.z:F3}) ls=({ls.x:F2},{ls.y:F2},{ls.z:F2}) | {Components(t.gameObject)}{extra}"));
+            if (depth >= maxDepth) { if (t.childCount > 0) sb.AppendLine($"{pad}  ... {t.childCount} children"); return; }
+            for (int i = 0; i < t.childCount; i++) DumpTree(sb, t.GetChild(i), depth + 1, maxDepth);
+        }
+
+        private static void DumpRig(StringBuilder sb)
+        {
+            var seen = new HashSet<IntPtr>();
+            void Root(string why, Transform t, int maxDepth)
+            {
+                if (t == null || !seen.Add(t.Pointer)) return;
+                sb.AppendLine($"-- {why}: {PathOf(t)}");
+                DumpTree(sb, t, 0, maxDepth);
+            }
+            foreach (var h in UnityEngine.Object.FindObjectsByType<Backrooms.Features.VR.VRHandModelSelector>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                Root("VRHandModelSelector", h.transform, 7);
+            foreach (var h in UnityEngine.Object.FindObjectsByType<Autohand.Hand>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                Root("Autohand.Hand", h.transform, 7);
+            foreach (var a in UnityEngine.Object.FindObjectsByType<AnimatedHands>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                Root("AnimatedHands", a.transform, 6);
+            foreach (var a in UnityEngine.Object.FindObjectsByType<XRControllerHandsAnimatorManager>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                Root("XRControllerHandsAnimatorManager", a.transform, 6);
+            foreach (var f in UnityEngine.Object.FindObjectsByType<FPSController>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                Root("FPSController", f.transform, 4);
+            foreach (var o in UnityEngine.Object.FindObjectsByType<Backrooms.Features.VR.PoolsXROrigin>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                Root("PoolsXROrigin", o.transform, 3);
+            foreach (var fp in UnityEngine.Object.FindObjectsByType<Backrooms.Features.VR.VRFootstepPlayer>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                sb.AppendLine($"-- VRFootstepPlayer at {PathOf(fp.transform)} effect={(fp.waterSplashEffect != null ? fp.waterSplashEffect.name : "none")}");
+            sb.AppendLine("-- skinned renderers in the scene:");
+            foreach (var smr in UnityEngine.Object.FindObjectsByType<SkinnedMeshRenderer>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                sb.AppendLine($"   {PathOf(smr.transform)} mesh='{(smr.sharedMesh != null ? smr.sharedMesh.name : "")}' active={smr.gameObject.activeInHierarchy}");
+            sb.AppendLine("-- loaded meshes with hand/arm/body/foot in the name:");
+            foreach (var m in Resources.FindObjectsOfTypeAll<Mesh>())
+            {
+                string n = m.name.ToLowerInvariant();
+                if (n.Contains("hand") || n.Contains("arm") || n.Contains("body") || n.Contains("foot") || n.Contains("leg") || n.Contains("player"))
+                    sb.AppendLine($"   mesh '{m.name}' v={m.vertexCount}");
+            }
+        }
+
         public static void DumpScene(string label)
         {
             var sb = new StringBuilder();
@@ -131,6 +192,10 @@ namespace PoolsCoop
                 }
             }
             catch (Exception e) { sb.AppendLine("button dump failed: " + e); }
+
+            sb.AppendLine("== player rig (hands, bodies, renderers)");
+            try { DumpRig(sb); }
+            catch (Exception e) { sb.AppendLine("rig dump failed: " + e); }
 
             string file = Path.Combine(OutDir, $"recon-{scene.name}-{label}.txt");
             File.WriteAllText(file, sb.ToString());

@@ -17,7 +17,7 @@ namespace PoolsCoop
     {
         public const string PluginGuid = "dev.poolscoop.probe";
         public const string PluginName = "PoolsCoop";
-        public const string PluginVersion = "0.2.0";
+        public const string PluginVersion = "0.3.0";
 
         internal static ManualLogSource Logger;
         internal static CoopSession Session;
@@ -32,6 +32,7 @@ namespace PoolsCoop
         internal static BodySync Bodies;
         internal static EventSync Events;
         internal static bool EventBot;         // test-only: fire a few trigger events and check they are replayed
+        internal static bool FxBot;            // test-only: call the game's footstep and splash methods, check the other side replays them
         internal static bool ForceVrPanel;     // test-only: build the VR (world-space) panel without a headset, to see that it builds and draws
         internal static bool AutoFollowHost;   // follow the host into the chapter without asking (tests); players get a Follow button instead
         internal static bool SaveGuard;        // test-only: block every progress/achievement write (see SaveGuard.cs)
@@ -177,6 +178,7 @@ namespace PoolsCoop
             Events = new EventSync();
             var sess = session;
             session.GameEventReceived += (id, kind, from) => Events?.OnRemote(id, kind, from, UnityEngine.Time.realtimeSinceStartup);
+            session.FxReceivedEvent += e => FxSync.OnRemote(e);
             session.BodyOwnerChanged += v => Bodies?.OnOwnerChanged(v, sess);
             session.BodyStateReceived += v => Bodies?.OnState(v, UnityEngine.Time.realtimeSinceStartup);
             session.PlayerJoined += p => Logger.LogInfo($"co-op: player joined id={p.Id} name='{p.Name}'");
@@ -274,6 +276,7 @@ namespace PoolsCoop
             WaterProbe = Config.Bind("Test", "WaterProbe", false, "Test only, needs a chapter scene and SaveGuard: drop a synthetic player through a water surface and count the splashes.").Value;
             ForceVrPanel = Config.Bind("Test", "ForceVrPanel", false, "Test only: build the VR world-space panel even without a headset.").Value;
             EventBot = Config.Bind("Test", "EventBot", false, "Test only: fire a few trigger events and count the replays on the other machine.").Value;
+            FxBot = Config.Bind("Test", "FxBot", false, "Test only, needs a chapter scene and SaveGuard: play footsteps and a splash through the game's own methods and count the replays on the other machine.").Value;
             AutoFollowHost = Config.Bind("Co-op", "AutoFollowHost", false, "If true a client loads the chapter the host starts without asking. Off by default: starting a chapter from the menu can reset that chapter's autosave.").Value;
             var bodyBotBase = Config.Bind("Test", "BodyBotBaseUnixMs", 0L, "Test only: shared start time (unix ms) so two processes push doors at the same moment.");
             BodyBotBase = bodyBotBase.Value;

@@ -72,39 +72,57 @@ namespace PoolsCoop
         {
             Rescan(now);
             if (Volumes.Count == 0) return;
-            Check(0, drawn.Head.Pos, now);
-            Check(1, drawn.Left.Pos, now);
-            Check(2, drawn.Right.Pos, now);
+            Check(0, drawn.Head.Pos, now, false);
+            // A VR friend's hands report their own splashes (the game's hand splash, sent as an effect); a flat-screen friend's hands
+            // are drawn by us, so we decide when they touch the water.
+            bool vr = (drawn.Flags & PoseFlags.Vr) != 0;
+            if (!vr)
+            {
+                Check(1, drawn.Left.Pos, now, true);
+                Check(2, drawn.Right.Pos, now, true);
+            }
+            else
+            {
+                Wake(1, drawn.Left.Pos, now);
+                Wake(2, drawn.Right.Pos, now);
+            }
         }
 
-        private void Check(int i, Vec3 p, float now)
+        /// <summary>Finds the water body at a point: true when the point is inside one (above or below the surface).</summary>
+        private static bool WaterAt(Vector3 pos, out WaterBodyVolume body, out bool under)
         {
-            var pos = new Vector3(p.X, p.Y, p.Z);
-            ref PartState st = ref _parts[i];
-
-            WaterBodyVolume body = null;
-            bool under = false;
+            body = null;
+            under = false;
             for (int k = 0; k < Volumes.Count; k++)
             {
-                if (!VolumeBounds[k].Contains(pos)) continue;
+                if (Volumes[k] == null || !VolumeBounds[k].Contains(pos)) continue;
                 try
                 {
-                    if (Volumes[k].IsPointUnderWater(new Unity.Mathematics.float3(pos.x, pos.y, pos.z))) { body = Volumes[k]; under = true; break; }
+                    if (Volumes[k].IsPointUnderWater(new Unity.Mathematics.float3(pos.x, pos.y, pos.z))) { body = Volumes[k]; under = true; return true; }
                     body = Volumes[k]; // near this water but above the surface
                 }
                 catch (Exception) { Errors++; }
             }
+            return body != null;
+        }
 
-            if (st.Has && body != null && under != st.Under && now >= st.NextEvent)
+        private void Check(int i, Vec3 p, float now, bool hand)
+        {
+            var pos = new Vector3(p.X, p.Y, p.Z);
+            ref PartState st = ref _parts[i];
+            WaterAt(pos, out WaterBodyVolume body, out bool under);
+
+            float dt = Mathf.Max(0.001f, now - st.PrevT);
+            float speed = st.Has ? (pos - st.Prev).magnitude / dt : 0f;
+            if (st.Has && body != null && under != st.Under && now >= st.NextEvent && speed > 0.25f)
             {
-                float dt = Mathf.Max(0.001f, now - st.PrevT);
-                float speed = (pos - st.Prev).magnitude / dt;
-                if (speed > 0.25f)
-                {
-                    st.NextEvent = now + 0.12f;
-                    if (under) Enters++; else Exits++;
-                    Splash(body, pos, speed);
-                }
+                st.NextEvent = now + 0.12f;
+                if (under) Enters++; else Exits++;
+                Splash(body, pos, speed, hand ? (under ? SoundHandEnter : SoundHandExit) : (under ? SoundBodyEnter : SoundBodyExit));
+            }
+            else if (st.Has && body != null && now >= st.NextEvent && speed > 0.35f)
+            {
+                WakeAt(body, pos, speed, now, ref st);
             }
 
             st.Has = true;
@@ -113,33 +131,130 @@ namespace PoolsCoop
             st.PrevT = now;
         }
 
-        private static void Splash(WaterBodyVolume body, Vector3 pos, float speed)
+        /// <summary>Small ripples behind a part that moves along the surface (hands sweeping the water, a head swimming).</summary>
+        private void Wake(int i, Vec3 p, float now)
+        {
+            var pos = new Vector3(p.X, p.Y, p.Z);
+            ref PartState st = ref _parts[i];
+            float dt = Mathf.Max(0.001f, now - st.PrevT);
+            float speed = st.Has ? (pos - st.Prev).magnitude / dt : 0f;
+            if (st.Has && now >= st.NextEvent && speed > 0.35f && WaterAt(pos, out WaterBodyVolume body, out bool _))
+                WakeAt(body, pos, speed, now, ref st);
+            st.Has = true;
+            st.Prev = pos;
+            st.PrevT = now;
+        }
+
+        private static void WakeAt(WaterBodyVolume body, Vector3 pos, float speed, float now, ref PartState st)
         {
             try
             {
-                var s = _template;
-                float size = s != null ? s.baseSize + s.sizePerVelocity * speed : 1.2f + 0.4f * speed;
-                float rspeed = s != null ? s.baseSpeed + s.speedPerVelocity * speed : 2f;
-                float amp = s != null ? s.baseAmplitude + s.amplitudePerVelocity * speed : 0.1f + 0.05f * speed;
-                size = Mathf.Clamp(size, 0.3f, 4f);
-                amp = Mathf.Clamp(amp, 0.02f, 0.6f);
+                Unity.Mathematics.float3 surf = body.ProjectToWaterSurface(new Unity.Mathematics.float3(pos.x, pos.y, pos.z));
+                if (Mathf.Abs(surf.y - pos.y) > 0.18f) return; // only right at the surface
+                st.NextEvent = now + 0.11f;
+                Ripple(new Vector3(surf.x, surf.y, surf.z), Mathf.Min(speed, 2.5f) * 0.6f, false);
+                Wakes++;
+            }
+            catch (Exception) { Errors++; }
+        }
 
+        public const int SoundNone = 0, SoundBodyEnter = 1, SoundBodyExit = 2, SoundHandEnter = 3, SoundHandExit = 4;
+        public static int Wakes, SoundsPlayed;
+        private static Backrooms.Features.WaterDeform.RigidbodyRippleSpawner _bodyAudio, _handAudio;
+        private static readonly System.Random Rng = new System.Random();
+
+        /// <summary>
+        /// A splash at a world position (for effects reported by another player): ripple, particles and the game's splash sound,
+        /// if the point is in or near water. Returns false when there is no water there.
+        /// </summary>
+        public static bool SplashAt(Vector3 pos, float speed, int sound)
+        {
+            Rescan(Time.realtimeSinceStartup);
+            if (!WaterAt(pos, out WaterBodyVolume body, out bool _))
+            {
+                // A footstep or splash right on the surface can be just outside the volume bounds; look a little lower.
+                if (!WaterAt(pos + Vector3.down * 0.3f, out body, out bool _)) return false;
+            }
+            Splash(body, pos, speed, sound);
+            return true;
+        }
+
+        private static bool _audioDiagDone;
+
+        private static void FindAudioTemplates()
+        {
+            if (_bodyAudio != null && _handAudio != null) return;
+            var diag = new System.Text.StringBuilder();
+            try
+            {
+                foreach (var s in UnityEngine.Object.FindObjectsByType<Backrooms.Features.WaterDeform.RigidbodyRippleSpawner>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                {
+                    if (s == null) continue;
+                    int n = s.enterWaterAudio == null ? -1 : s.enterWaterAudio.Length;
+                    if (!_audioDiagDone) diag.Append($" [{s.gameObject.name} player={s.isPlayer} hand={FxSync.IsHandSpawner(s)} sound={s.useSplashSound} enterAudio={n}]");
+                    if (n <= 0) continue;
+                    if (FxSync.IsHandSpawner(s)) { if (_handAudio == null) _handAudio = s; }
+                    else if (s.isPlayer && (_bodyAudio == null || s.gameObject.activeInHierarchy)) _bodyAudio = s;
+                }
+            }
+            catch (Exception e) { diag.Append(" error " + e.Message); }
+            if (!_audioDiagDone) { _audioDiagDone = true; Plugin.Logger.LogInfo("water audio sources:" + diag); }
+        }
+
+        private static void PlaySound(int sound, Vector3 pos)
+        {
+            if (sound == SoundNone) return;
+            try
+            {
+                FindAudioTemplates();
+                bool hand = sound == SoundHandEnter || sound == SoundHandExit;
+                bool enter = sound == SoundBodyEnter || sound == SoundHandEnter;
+                var src = hand ? (_handAudio ?? _bodyAudio) : (_bodyAudio ?? _handAudio);
+                if (src == null) return;
+                var arr = enter ? src.enterWaterAudio : src.exitWaterAudio;
+                if (arr == null || arr.Length == 0) arr = src.enterWaterAudio;
+                if (arr == null || arr.Length == 0) return;
+                FMODUnity.RuntimeManager.PlayOneShot(arr[Rng.Next(arr.Length)], pos);
+                SoundsPlayed++;
+            }
+            catch (Exception e)
+            {
+                Errors++;
+                if (Errors < 4) Plugin.Logger.LogWarning($"puppet splash sound failed: {e.Message}");
+            }
+        }
+
+        private static void Ripple(Vector3 surface, float speed, bool particles)
+        {
+            var s = _template;
+            float size = s != null ? s.baseSize + s.sizePerVelocity * speed : 1.2f + 0.4f * speed;
+            float rspeed = s != null ? s.baseSpeed + s.speedPerVelocity * speed : 2f;
+            float amp = s != null ? s.baseAmplitude + s.amplitudePerVelocity * speed : 0.1f + 0.05f * speed;
+            size = Mathf.Clamp(size, 0.3f, 4f);
+            amp = Mathf.Clamp(amp, 0.02f, 0.6f);
+            if (Backrooms.Features.WaterDeform.RippleManager.IsInstanced)
+            {
+                // The game culls ripples far from the camera; the probe's water is far from the player, so it turns culling off.
+                Backrooms.Features.WaterDeform.RippleManager.Instance.TrySpawnRipple(surface, size, rspeed, amp, !_probeStartedOnce);
+                RipplesRequested++;
+                int active = Backrooms.Features.WaterDeform.RippleManager.Instance.activeRipples.Count;
+                if (active > MaxActiveRipples) MaxActiveRipples = active;
+            }
+            if (particles && s != null)
+            {
+                s.SpawnRippleParticles(0.3f, surface, amp);
+                ParticlesSpawned++;
+            }
+        }
+
+        private static void Splash(WaterBodyVolume body, Vector3 pos, float speed, int sound)
+        {
+            try
+            {
                 Unity.Mathematics.float3 surf = body.ProjectToWaterSurface(new Unity.Mathematics.float3(pos.x, pos.y, pos.z));
                 var surface = new Vector3(surf.x, surf.y, surf.z);
-
-                if (Backrooms.Features.WaterDeform.RippleManager.IsInstanced)
-                {
-                    // The game culls ripples far from the camera; the probe's water is far from the player, so it turns culling off.
-                    Backrooms.Features.WaterDeform.RippleManager.Instance.TrySpawnRipple(surface, size, rspeed, amp, !_probeStartedOnce);
-                    RipplesRequested++;
-                    int active = Backrooms.Features.WaterDeform.RippleManager.Instance.activeRipples.Count;
-                    if (active > MaxActiveRipples) MaxActiveRipples = active;
-                }
-                if (s != null && speed > 0.6f)
-                {
-                    s.SpawnRippleParticles(0.3f, surface, amp);
-                    ParticlesSpawned++;
-                }
+                Ripple(surface, speed, speed > 0.6f);
+                PlaySound(sound, surface);
             }
             catch (Exception e)
             {
