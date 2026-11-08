@@ -50,6 +50,7 @@ namespace PoolsCoop.Tests
             Test("events: scripted events reach everyone exactly once through loss, duplicates and relay", GameEvents);
             Test("pose extension: finger bends, skin, flags round trip, old packets still read, relay and buffer keep them", PoseExtension);
             Test("effects: footsteps and splashes reach everyone once, sender id enforced, rate limited", Effects);
+            Test("sounds: session seed reaches every client, shared rolls agree, sounds arrive once through loss and relay", SharedSounds);
             Test("capacity: the fourth guest is turned away", Capacity);
             Test("fuzz: random and mutated packets never crash a session and never leak slots", Fuzz);
             Test("udp: real sockets on loopback, handshake and poses", RealUdp);
@@ -711,6 +712,44 @@ namespace PoolsCoop.Tests
                 "fingers, skin and flags arrive at B through the host and through the buffer");
             var mid = FingerBends.Lerp(FingerBends.All(0), FingerBends.All(200), 0.5);
             Check(mid.Middle == 100, "finger bends interpolate");
+        }
+
+        private static void SharedSounds()
+        {
+            // the same seed and key give the same number; different keys spread out
+            Check(SharedRandom.Unit(123, 456) == SharedRandom.Unit(123, 456), "shared roll is deterministic");
+            int below = 0;
+            for (uint k = 0; k < 10000; k++) if (SharedRandom.Unit(987654321, k) < 0.3) below++;
+            Check(below > 2800 && below < 3200, $"shared roll is uniform enough (30% chance -> {below / 100.0:F1}%)");
+            Check(SharedRandom.Hash("a|b") == SharedRandom.Hash("a|b") && SharedRandom.Hash("a|b") != SharedRandom.Hash("a|c"), "object ids hash stably");
+
+            foreach (double loss in new[] { 0.0, 0.3 })
+            {
+                var hub = new FakeHub(111 + (int)(loss * 10)) { Loss = loss, Dup = loss > 0 ? 0.2 : 0, MinDelayMs = 0, MaxDelayMs = loss > 0 ? 120 : 0 };
+                var host = MakeNode(hub, SessionRole.Host, "H");
+                var a = MakeNode(hub, SessionRole.Client, "A");
+                var b = MakeNode(hub, SessionRole.Client, "B");
+                hub.Run(6000, Pump(host), Pump(a), Pump(b));
+                Check(host.S.Seed != 0 && a.S.Seed == host.S.Seed && b.S.Seed == host.S.Seed, $"[loss {loss}] both clients know the host's seed");
+                var onHost = new List<SoundEvent>(); var onA = new List<SoundEvent>(); var onB = new List<SoundEvent>();
+                host.S.SoundReceived += e => onHost.Add(e);
+                a.S.SoundReceived += e => onA.Add(e);
+                b.S.SoundReceived += e => onB.Add(e);
+                for (uint i = 0; i < 15; i++) { host.S.SendSound(new SoundEvent { G1 = 0xAABB0000 + i, G2 = 2, G3 = 3, G4 = 4, Pos = new Vec3(i, 2, 3), Source = 77, Flags = 1 }); hub.Run(80, Pump(host), Pump(a), Pump(b)); }
+                for (uint i = 0; i < 10; i++) { a.S.SendSound(new SoundEvent { G1 = 0xCC000000 + i, G2 = 1, G3 = 1, G4 = 1, Pos = new Vec3(0, 0, i), Source = 88, Flags = 3 }); hub.Run(80, Pump(host), Pump(a), Pump(b)); }
+                hub.Run(3000, Pump(host), Pump(a), Pump(b));
+                double need = loss > 0 ? 0.9 : 1.0;
+                Check(onA.FindAll(e => e.Source == 77).Count >= need * 15 && onB.FindAll(e => e.Source == 77).Count >= need * 15, $"[loss {loss}] the host's random sounds reach both clients ({onA.Count}, {onB.Count}, B connected={b.S.Connected} id={b.S.LocalId} A id={a.S.LocalId} hostRemotes={host.S.Remotes.Count} bRemotes={b.S.Remotes.Count} bIn={b.S.PacketsIn} bBad={b.S.BadPackets} hostSent={host.S.SoundsSent} bRecv={b.S.SoundsReceived})");
+                Check(onHost.FindAll(e => e.Source == 88).Count >= need * 10 && onB.FindAll(e => e.Source == 88).Count >= need * 10, $"[loss {loss}] A's trigger sounds reach the host and B through the relay");
+                Check(onA.TrueForAll(e => e.Source != 88), $"[loss {loss}] A never hears its own sound twice");
+                var all = new List<SoundEvent>(onB);
+                var keys = new HashSet<string>();
+                bool dup = false;
+                foreach (var e in all) if (!keys.Add(e.From + ":" + e.G1)) dup = true;
+                Check(!dup, $"[loss {loss}] no sound plays twice");
+                var one = onB.Find(e => e.Source == 77);
+                Check(onB.Count == 0 || (one.G2 == 2 && one.G3 == 3 && one.G4 == 4 && one.Pos.Y == 2 && one.Flags == 1 && one.From == 0), $"[loss {loss}] GUID, place, source and sender survive");
+            }
         }
 
         private static void Effects()

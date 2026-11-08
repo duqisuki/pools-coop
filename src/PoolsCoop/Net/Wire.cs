@@ -19,6 +19,7 @@ namespace PoolsCoop.Net
         BodyRelease = 11, // owner -> host: body X came to rest, nobody needs to stream it
         GameEvent = 12,   // a scripted event fired for one player (scare, trigger); everyone else replays it
         Fx = 13,          // a one-shot effect at a place (footstep, splash); unreliable, sent once, relayed by the host
+        Sound = 14,       // a game sound event (FMOD GUID) at a place, chosen on one machine and played on all; repeated like GameEvent
     }
 
     /// <summary>Kinds of Fx messages.</summary>
@@ -28,6 +29,19 @@ namespace PoolsCoop.Net
         public const byte BodySplash = 2; // A = speed, B = 1 enter / 0 exit
         public const byte BigSplash = 3;  // A = air time, C = splash type
         public const byte HandSplash = 4; // A = speed, B = 1 enter / 0 exit
+    }
+
+    /// <summary>A game sound (FMOD event GUID as four ints) at a place; Source is a hash of the object that played it (0 = none).</summary>
+    public struct SoundEvent
+    {
+        public byte From;
+        public ushort Seq;
+        public uint G1, G2, G3, G4;
+        public Vec3 Pos;
+        public uint Source;
+        public byte Flags;
+
+        public bool IsSane => Pos.IsSane && (G1 | G2 | G3 | G4) != 0;
     }
 
     /// <summary>One effect: kind, the player it happened to, where, and a few numbers whose meaning depends on the kind.</summary>
@@ -225,7 +239,7 @@ namespace PoolsCoop.Net
             if ((ushort)(data[0] | (data[1] << 8)) != Magic) return false;
             if (data[2] != Version) return false;
             byte t = data[3];
-            if (t < (byte)MsgType.Hello || t > (byte)MsgType.Fx) return false;
+            if (t < (byte)MsgType.Hello || t > (byte)MsgType.Sound) return false;
             type = (MsgType)t;
             reader = new PacketReader(data, len, 4);
             return true;
@@ -240,10 +254,14 @@ namespace PoolsCoop.Net
         public static byte[] EncodePose(byte playerId, ushort seq, uint timeMs, PlayerPose pose) =>
             new PacketWriter(MsgType.Pose).U8(playerId).U16(seq).U32(timeMs).Player(pose).ToArray();
 
-        public static byte[] EncodeState(string scene, ushort epoch, IList<PlayerInfo> players)
+        public static byte[] EncodeState(string scene, ushort epoch, IList<PlayerInfo> players) => EncodeState(scene, epoch, players, 0);
+
+        /// <summary>State with the session seed appended (older readers ignore it): every machine derives the same "random" choices from it.</summary>
+        public static byte[] EncodeState(string scene, ushort epoch, IList<PlayerInfo> players, uint seed)
         {
             var w = new PacketWriter(MsgType.State).Str(scene, MaxScene).U16(epoch).U8((byte)players.Count);
             foreach (var p in players) w.U8(p.Id).Str(p.Name, MaxName);
+            if (seed != 0) w.U32(seed);
             return w.ToArray();
         }
 
@@ -255,6 +273,22 @@ namespace PoolsCoop.Net
 
         public static byte[] EncodeGameEvent(uint eventId, byte kind, byte from, ushort seq) =>
             new PacketWriter(MsgType.GameEvent).U32(eventId).U8(kind).U8(from).U16(seq).ToArray();
+
+        public static byte[] EncodeSound(SoundEvent e) =>
+            new PacketWriter(MsgType.Sound).U8(e.From).U16(e.Seq).U32(e.G1).U32(e.G2).U32(e.G3).U32(e.G4)
+                .F32(e.Pos.X).F32(e.Pos.Y).F32(e.Pos.Z).U32(e.Source).U8(e.Flags).ToArray();
+
+        public static SoundEvent ReadSound(PacketReader r)
+        {
+            var e = new SoundEvent();
+            e.From = r.U8();
+            e.Seq = r.U16();
+            e.G1 = r.U32(); e.G2 = r.U32(); e.G3 = r.U32(); e.G4 = r.U32();
+            e.Pos = new Vec3(r.F32(), r.F32(), r.F32());
+            e.Source = r.U32();
+            e.Flags = r.U8();
+            return e;
+        }
 
         public static byte[] EncodeFx(FxEvent e) =>
             new PacketWriter(MsgType.Fx).U8(e.Kind).U8(e.From).F32(e.Pos.X).F32(e.Pos.Y).F32(e.Pos.Z).F32(e.A).F32(e.B).U8(e.C).U8(e.D).ToArray();

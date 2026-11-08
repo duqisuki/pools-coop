@@ -153,3 +153,29 @@ Not verified: how the hands and the head/torso look (no rendering in the allowed
 `-nographics` run, so the head and torso fall back to `HDRP/Unlit` there), the name label, finger bends from a real headset, the VR
 button pressed by a real controller ray, footsteps and splashes heard by a person, the F7 problem on the owner's PC (needs its
 `BepInEx\LogOutput.log`).
+
+## 0.3.1 (2026-11-08): shared random sounds, water slosh, keep-alive fix
+
+- Random sound sources in the game: `ScatteredOneShotAudioPlayer` (random FMOD event from a list at a random place on a random timer;
+  chapter 0 has 2, both disabled until a script enables them), `OffScreenDetectorAudioPlayer` (chance roll when you look away, 0 in
+  chapter 0), `PlayOneSoundTrigger` (3 in chapter 0), `OnStartRandomEvent` (chance roll in `Start`, 0 in chapter 0). Random scares that
+  are `RandomEventTrigger` / trigger UnityEvents were already replayed by EventSync.
+- **FMOD's `RuntimeManager.PlayOneShot` must not be Harmony-patched:** it returns `Il2CppSystem.Nullable<EventInstance>` and the
+  native->managed trampoline throws `NullReferenceException` in `CreateGCHandle`; the chapter load then stalled. Calling it from the
+  plugin is fine. So: the host runs its own copy of `ScatteredOneShotAudioPlayer.Update` (same fields: wait range, list, positions,
+  offset, play limit) and sends the event GUID and place; clients in the host's chapter skip their copy. Offscreen and trigger players
+  run the game's code; a postfix compares `spawns` / `_played` with the prefix value and sends `audioEventRef` when it played.
+  `OnStartRandomEvent.Start` uses `SharedRandom.Unit(sessionSeed, objectId)` in co-op, so all machines take the same branch.
+- New message `Sound` = 14 (from, seq, GUID as 4 x u32, position, source id, kind) with the scripted-event repeats and dedupe; the receiver
+  plays it only if the source object exists in its own scene (and marks a `PlayOneSoundTrigger` as played). The host's seed travels as
+  4 trailing bytes of `State`.
+- Pair runs, chapter 0, flat and VR: the host's copy picked and played 2 random sounds, the client received and played them (plus one
+  direct test sound each way), unknown sources 0, failures 0.
+- Remote water: a friend's hand or swimming head moving fast along the surface plays the game's hand splash sounds (every 0.4-0.9 s).
+- **Net fix found by the new test:** with some loss patterns the host timed out an idle client (pings once a second, no poses in the
+  menu) while the client still believed it was connected and heard nothing for up to 5 s. The old event test failed the same way on
+  that network seed (B got 0/40 relayed events). Now pings go every 500 ms and the host answers a packet from an unknown connection with
+  `Bye` (at most once a second, never to a Bye), so the client re-joins at once. 246 offline checks pass, including that seed.
+
+Not verified: a person hearing these sounds; `OffScreenDetectorAudioPlayer`, `PlayOneSoundTrigger` and `OnStartRandomEvent` firing in
+a real run (none fired in the bot runs; their code paths only compiled and loaded).

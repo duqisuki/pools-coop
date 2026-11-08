@@ -149,3 +149,27 @@ namespace PoolsCoop.Net
         }
     }
 }
+
+namespace PoolsCoop.Net
+{
+    /// <summary>"Random" numbers every machine agrees on: a hash of the session seed and a key (an object's id).</summary>
+    public static class SharedRandom
+    {
+        public static uint Hash(string text)
+        {
+            uint h = 2166136261u;
+            foreach (char c in text ?? "") { h ^= c; h *= 16777619u; }
+            return h;
+        }
+
+        /// <summary>A number in [0, 1) that depends only on seed and key (splitmix-style mixing).</summary>
+        public static double Unit(uint seed, uint key)
+        {
+            ulong z = ((ulong)seed << 32 | key) + 0x9E3779B97F4A7C15UL;
+            z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9UL;
+            z = (z ^ (z >> 27)) * 0x94D049BB133111EBUL;
+            z ^= z >> 31;
+            return (z >> 11) * (1.0 / (1UL << 53));
+        }
+    }
+}

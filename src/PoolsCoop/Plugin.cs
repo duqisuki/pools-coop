@@ -17,7 +17,7 @@ namespace PoolsCoop
     {
         public const string PluginGuid = "dev.poolscoop.probe";
         public const string PluginName = "PoolsCoop";
-        public const string PluginVersion = "0.3.0";
+        public const string PluginVersion = "0.3.1";
 
         internal static ManualLogSource Logger;
         internal static CoopSession Session;
@@ -179,6 +179,7 @@ namespace PoolsCoop
             var sess = session;
             session.GameEventReceived += (id, kind, from) => Events?.OnRemote(id, kind, from, UnityEngine.Time.realtimeSinceStartup);
             session.FxReceivedEvent += e => FxSync.OnRemote(e);
+            session.SoundReceived += e => SoundSync.OnRemote(e);
             session.BodyOwnerChanged += v => Bodies?.OnOwnerChanged(v, sess);
             session.BodyStateReceived += v => Bodies?.OnState(v, UnityEngine.Time.realtimeSinceStartup);
             session.PlayerJoined += p => Logger.LogInfo($"co-op: player joined id={p.Id} name='{p.Name}'");

@@ -30,6 +30,7 @@ namespace PoolsCoop
             public Vector3 Prev;
             public float PrevT;
             public float NextEvent;
+            public float NextSound;
         }
 
         private readonly PartState[] _parts = new PartState[3];
@@ -152,14 +153,22 @@ namespace PoolsCoop
                 Unity.Mathematics.float3 surf = body.ProjectToWaterSurface(new Unity.Mathematics.float3(pos.x, pos.y, pos.z));
                 if (Mathf.Abs(surf.y - pos.y) > 0.18f) return; // only right at the surface
                 st.NextEvent = now + 0.11f;
-                Ripple(new Vector3(surf.x, surf.y, surf.z), Mathf.Min(speed, 2.5f) * 0.6f, false);
+                var surface = new Vector3(surf.x, surf.y, surf.z);
+                Ripple(surface, Mathf.Min(speed, 2.5f) * 0.6f, false);
                 Wakes++;
+                // the slosh of a hand or a swimmer moving fast through the surface (the game's own hand splash sounds), not too often
+                if (speed > 0.9f && now >= st.NextSound)
+                {
+                    st.NextSound = now + Mathf.Lerp(0.9f, 0.4f, Mathf.Clamp01((speed - 0.9f) / 2f));
+                    PlaySound(Rng.Next(2) == 0 ? SoundHandEnter : SoundHandExit, surface);
+                    WakeSounds++;
+                }
             }
             catch (Exception) { Errors++; }
         }
 
         public const int SoundNone = 0, SoundBodyEnter = 1, SoundBodyExit = 2, SoundHandEnter = 3, SoundHandExit = 4;
-        public static int Wakes, SoundsPlayed;
+        public static int Wakes, SoundsPlayed, WakeSounds;
         private static Backrooms.Features.WaterDeform.RigidbodyRippleSpawner _bodyAudio, _handAudio;
         private static readonly System.Random Rng = new System.Random();
 

@@ -77,7 +77,7 @@ namespace PoolsCoop
 
                 if (Plugin.Events != null)
                 {
-                    try { Plugin.Events.Update(s, now); UpdateEventBot(s, now); FxSync.RunBot(s, now); }
+                    try { Plugin.Events.Update(s, now); UpdateEventBot(s, now); FxSync.RunBot(s, now); SoundSync.RunBot(s, now); }
                     catch (Exception e) { Plugin.Logger.LogWarning($"event sync failed: {e}"); }
                 }
 
@@ -107,6 +107,7 @@ namespace PoolsCoop
                 }
                 catch (Exception e) { Plugin.Logger.LogWarning($"event final log failed: {e.Message}"); }
                 Plugin.Logger.LogInfo($"FX-STATS botCalls={FxSync.BotCalls} botErrors={FxSync.BotErrors} sentSteps={FxSync.SentSteps} sentSplashes={FxSync.SentSplashes} replayedSteps={FxSync.ReplayedSteps} replayedSplashes={FxSync.ReplayedSplashes} failures={FxSync.Failures} ripples={PuppetWater.RipplesRequested} particles={PuppetWater.ParticlesSpawned} sounds={PuppetWater.SoundsPlayed} wakes={PuppetWater.Wakes} waterErrors={PuppetWater.Errors}");
+                if (s != null) Plugin.Logger.LogInfo($"SOUND-STATS captured={SoundSync.Captured} sent={s.SoundsSent} received={s.SoundsReceived} played={SoundSync.Played} skippedClient={SoundSync.SkippedClient} unknownSource={SoundSync.UnknownSource} startRolls={SoundSync.StartRolls} failures={SoundSync.Failures} scatteredPlayers={SoundSync.BotScattered} onStartRandom={SoundSync.BotStartRandom} triggers={SoundSync.BotTriggers} offscreen={SoundSync.BotOffscreen} seed={s.Seed != 0}");
                 LogTestResult(s);
                 Application.Quit();
             }

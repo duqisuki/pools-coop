@@ -67,7 +67,7 @@ namespace PoolsCoop.Net
         public const long TimeoutMs = 5000;
         public const long HelloRetryMs = 500;
         public const long StateEveryMs = 1000;
-        public const long PingEveryMs = 1000;
+        public const long PingEveryMs = 500; // also the keep-alive when no poses flow (menus): 10 losses in a row before a timeout
 
         private sealed class Peer
         {
@@ -80,6 +80,10 @@ namespace PoolsCoop.Net
         private readonly ITransport _t;
         private readonly IClock _clock;
         private readonly Dictionary<int, Peer> _peers = new Dictionary<int, Peer>();
+        private readonly Dictionary<int, long> _byeSentAt = new Dictionary<int, long>();
+
+        /// <summary>Host only: Bye messages sent to connections that are not in the session (a timed-out client that kept talking).</summary>
+        public int ByesToStrays { get; private set; }
 
         private string _localScene = "";
         private ushort _epoch;
@@ -99,6 +103,12 @@ namespace PoolsCoop.Net
             Connected = role == SessionRole.Host;
             _lastHostRecvMs = clock.NowMs;
             _lastStateMs = clock.NowMs;
+            if (role == SessionRole.Host)
+            {
+                uint seed;
+                do { seed = (uint)Guid.NewGuid().GetHashCode(); } while (seed == 0);
+                Seed = seed;
+            }
         }
 
         /// <summary>The session's own millisecond clock; use it with PoseBuffer.Sample.</summary>
@@ -211,6 +221,56 @@ namespace PoolsCoop.Net
                 foreach (var p in _peers.Values) if (p.Id != senderId) QueueEventTo(p.Conn, pkt, _clock.NowMs);
             }
             GameEventReceived?.Invoke(id, kind, from);
+        }
+
+        // ---- shared sounds and the session seed ----------------------------------------------------
+        //
+        // A sound the game picked at random (or a scare one player triggered) must be the same sound at the same place for everyone.
+        // Sent with the scripted-event repeats and (sender, sequence) dedupe, relayed by the host.
+
+        /// <summary>
+        /// A random number chosen by the host when the session starts and carried in every State message. Machines derive per-object
+        /// "random" decisions from it (hash of seed and object), so they agree without asking each other. 0 until known on a client.
+        /// </summary>
+        public uint Seed { get; private set; }
+
+        private const int MaxSoundsPerSecond = 20;
+        private long _soundWindowStart;
+        private int _soundWindowCount;
+        public int SoundsSent { get; private set; }
+        public int SoundsReceived { get; private set; }
+
+        /// <summary>Fires once per sound from another player.</summary>
+        public event Action<SoundEvent> SoundReceived;
+
+        public void SendSound(SoundEvent e)
+        {
+            if (!Connected || !e.IsSane) return;
+            long now = _clock.NowMs;
+            if (now - _soundWindowStart > 1000) { _soundWindowStart = now; _soundWindowCount = 0; }
+            if (++_soundWindowCount > MaxSoundsPerSecond) return;
+            unchecked { _eventSeq++; }
+            e.From = LocalId;
+            e.Seq = _eventSeq;
+            SoundsSent++;
+            QueueEvent(Wire.EncodeSound(e), now);
+        }
+
+        private void HandleSound(byte senderId, PacketReader r)
+        {
+            SoundEvent e = Wire.ReadSound(r);
+            if (!e.IsSane) { BadPackets++; return; }
+            if (Role == SessionRole.Host) e.From = senderId;
+            else if (e.From >= Wire.MaxPlayers) return;
+            if (e.From == LocalId && Role == SessionRole.Client) return;
+            if (!FirstTimeSeen(e.From, e.Seq)) return;
+            SoundsReceived++;
+            if (Role == SessionRole.Host)
+            {
+                byte[] pkt = Wire.EncodeSound(e);
+                foreach (var p in _peers.Values) if (p.Id != senderId) QueueEventTo(p.Conn, pkt, _clock.NowMs);
+            }
+            SoundReceived?.Invoke(e);
         }
 
         // ---- one-shot effects (footsteps, splashes) ------------------------------------------------
@@ -621,7 +681,7 @@ namespace PoolsCoop.Net
 
         private void BroadcastState()
         {
-            byte[] pkt = Wire.EncodeState(_localScene, _epoch, PlayerList());
+            byte[] pkt = Wire.EncodeState(_localScene, _epoch, PlayerList(), Seed);
             foreach (var p in _peers.Values) Send(p.Conn, pkt);
             _lastStateMs = _clock.NowMs;
         }
@@ -676,6 +736,19 @@ namespace PoolsCoop.Net
                 // A well-formed packet from someone who is not (or no longer) in the session, e.g. a packet still in flight
                 // after a timeout, or an echo of our own packet. Not malformed, so not "bad"; just do not keep a slot for it.
                 StrayPackets++;
+                // A client we timed out may still believe it is connected (its packets arrive, ours stopped). Tell it, so it re-joins
+                // at once instead of hearing nothing for up to TimeoutMs. Never answer a Bye (no ping-pong with an echo), at most
+                // once per second per connection.
+                if (type != MsgType.Bye && type != MsgType.Pong)
+                {
+                    if (!_byeSentAt.TryGetValue(conn, out long last) || now - last >= 1000)
+                    {
+                        _byeSentAt[conn] = now;
+                        if (_byeSentAt.Count > 64) _byeSentAt.Clear();
+                        Send(conn, Wire.EncodeBye());
+                        ByesToStrays++;
+                    }
+                }
                 _t.Forget(conn);
                 return;
             }
@@ -719,6 +792,9 @@ namespace PoolsCoop.Net
                     break;
                 case MsgType.Fx:
                     HandleFx(peer.Id, r);
+                    break;
+                case MsgType.Sound:
+                    HandleSound(peer.Id, r);
                     break;
                 default:
                     break; // Welcome/State/Pong/BodyGrant are not meant for the host; ignore
@@ -789,7 +865,9 @@ namespace PoolsCoop.Net
                     if (count > Wire.MaxPlayers) throw new FormatException("too many players");
                     var infos = new List<PlayerInfo>(count);
                     for (int i = 0; i < count; i++) infos.Add(new PlayerInfo(r.U8(), Sanitize(r.Str(), Wire.MaxName)));
+                    uint seed = r.Remaining >= 4 ? r.U32() : 0;
                     if (!Connected) break; // wait for Welcome so LocalId is known
+                    if (seed != 0) Seed = seed;
                     ApplyPlayerList(infos);
                     SetHostScene(scene);
                     break;
@@ -830,6 +908,9 @@ namespace PoolsCoop.Net
                     break;
                 case MsgType.Fx:
                     if (Connected) HandleFx(0, r);
+                    break;
+                case MsgType.Sound:
+                    if (Connected) HandleSound(0, r);
                     break;
                 default:
                     break;
