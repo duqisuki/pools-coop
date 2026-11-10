@@ -203,6 +203,14 @@ try {
     if ((Get-Sha256 $dest) -ne $pluginHash) { Fail "Copy of PoolsCoop.dll into '$plugDir' is damaged." }
     $added.Add('BepInEx\plugins\PoolsCoop\PoolsCoop.dll')
 
+    # The flat game starts the VR build as a child process, which inherits DOORSTOP_DISABLE and would skip the mod loader.
+    $ds = Join-Path $t 'doorstop_config.ini'
+    if (Test-Path $ds) {
+      $c = [IO.File]::ReadAllText($ds)
+      $c2 = $c -replace '(?m)^ignore_disable_switch\s*=\s*false', 'ignore_disable_switch = true'
+      if ($c2 -ne $c) { [IO.File]::WriteAllText($ds, $c2, (New-Object System.Text.UTF8Encoding($false))) }
+    }
+
     $out = New-Object System.Collections.Generic.List[string]
     $out.Add('# written by the POOLS Co-op installer; uninstall removes exactly these files')
     if ($ownBepInEx) { $out.Add('#bepinex=installed-by-poolscoop') }

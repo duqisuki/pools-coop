@@ -17,7 +17,7 @@ namespace PoolsCoop
     {
         public const string PluginGuid = "dev.poolscoop.probe";
         public const string PluginName = "PoolsCoop";
-        public const string PluginVersion = "0.3.1";
+        public const string PluginVersion = "0.3.2";
 
         internal static ManualLogSource Logger;
         internal static CoopSession Session;
@@ -256,6 +256,16 @@ namespace PoolsCoop
         {
             Logger = Log;
             Logger.LogInfo($"{PluginName} {PluginVersion} loading");
+
+            // The flat game starts the VR build as a child process (its VR button). Doorstop leaves DOORSTOP_DISABLE in this process's
+            // environment, the child inherits it, and the mod loader then switches itself off there: no co-op in VR at all.
+            try
+            {
+                string dis = Environment.GetEnvironmentVariable("DOORSTOP_DISABLE");
+                Logger.LogInfo($"DOORSTOP_DISABLE was '{dis}' (cleared so a VR build started from here loads the mod too)");
+                Environment.SetEnvironmentVariable("DOORSTOP_DISABLE", null);
+            }
+            catch (Exception e) { Logger.LogWarning($"could not clear DOORSTOP_DISABLE: {e.Message}"); }
 
             // Everything is off unless the config asks for it, so the mod cannot change normal play by accident.
             var role = Config.Bind("Net", "Role", "Off", "Off, Host or Client. Off = the mod only logs and does nothing else.");
