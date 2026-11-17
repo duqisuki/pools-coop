@@ -1,5 +1,7 @@
 # POOLS (Tensori) — co-op working notes
 
+**Update (version 0.3.2): live test done.** The mod was played with a second real person, including the VR build with a headset, and everything worked great. The status line below is the earlier bot-only status, kept for history.
+
 Started 2026-11-07. Status: **flat (non-VR) build: a host and a client (two separate game processes, bots instead of people) connect over UDP and over real Steam P2P (one account), see each other as puppets drawn from an interpolation buffer, share hinged doors and ducks with epoch-based ownership, and invite through an F7 panel and Steam rich presence. VR build: same code, headless runs only. Not yet: a test with two different Steam accounts or two real people, real VR poses, a VR panel, chapter follow, chairs.**
 Nothing here is a claim that co-op works. Path 2 (build from zero): no prior co-op mod found.
 

@@ -5,8 +5,9 @@
 «страшные моменты» срабатывают у всех. Работает через BepInEx 6 (IL2CPP), в обычной и в VR-версии игры.
 В репозитории **нет файлов игры**: BepInEx скачивается установщиком с официального сайта и проверяется по SHA-256.
 
-> **Честный статус.** Всё проверено ботами на двух копиях игры на одном ПК (обычная и VR-версия, без шлема) и на одной учётной
-> записи Steam. Игры с живым вторым человеком и со шлемом ещё не было. Подробности и список непроверенного: [docs/NOTES.md](docs/NOTES.md).
+> **Статус: протестировано вживую, работает отлично.** Мод (версия 0.3.2) проверен в реальной игре с живым вторым игроком,
+> в том числе в VR-версии со шлемом. До этого всё проверялось ботами на двух копиях игры на одном ПК.
+> Журнал разработки и тестов: [docs/NOTES.md](docs/NOTES.md).
 
 ## Установка (Windows)
 
@@ -87,5 +88,5 @@ downloads the pinned BepInEx 6 IL2CPP build with a SHA-256 check, copies it plus
 menu press the **CO-OP (F7)** button (or F7/F8); in VR point at the **CO-OP** button under the side buttons of the VR main menu, or open the
 pause menu in a chapter. *Host a game* or *Join a friend*; both players need the mod, must be Steam friends and start the same chapter.
 Friends appear with the game's own VR hands (finger bending synced), their footsteps and splashes play at their position, doors and
-floating objects are shared. Tested with bots on two game copies and one Steam account only; not yet with a second real person or a
-headset. No game files are included. MIT licence for the mod code; BepInEx is downloaded separately under its own licence.
+floating objects are shared. Tested live with a second real player, including the VR build with a headset: everything works great
+(version 0.3.2); earlier tests used bots on two game copies. No game files are included. MIT licence for the mod code; BepInEx is downloaded separately under its own licence.
