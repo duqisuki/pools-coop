@@ -1,3 +1,18 @@
+> **English:** Unofficial online co-op mod for **POOLS** (Steam), flat and VR versions.
+> A BepInEx 6 (IL2CPP) plugin in C# that syncs head and finger-tracked hands at 60 Hz with
+> interpolation, footsteps and water splashes, doors and props, and scripted scare events
+> over Steam P2P networking (plus a UDP transport for local testing). Ships with a one-line
+> installer that downloads BepInEx from the official source and verifies SHA-256; no game
+> files are included. Tested live with a second player, including VR.
+>
+> ```powershell
+> powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm https://raw.githubusercontent.com/duqisuki/pools-coop/main/install.ps1)))"
+> ```
+>
+> Tech: C# · BepInEx 6 / Il2CppInterop · Unity · Steamworks P2P · custom binary protocol · PowerShell. License: [MIT](LICENSE).
+
+---
+
 # POOLS Co-op (мод для кооператива в POOLS)
 
 Неофициальный мод, который добавляет в игру **POOLS** (Steam, app 2663530) совместную игру с друзьями по Steam: вы видите друг друга
